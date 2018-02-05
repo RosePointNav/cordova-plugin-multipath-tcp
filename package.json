@@ -1,0 +1,12 @@
+{
+  "name": "multipathTCP",
+  "version": "0.1.0",
+  "cordova": {
+    "id": "cordova-plugin-multipath-tcp",
+    "platforms": [
+      "android",
+      "ios"
+    ]
+  },
+  "description": "Plugin for connecting to an endpoint via cell network when connected to a WIFI network with limited/no connectivity."
+}
