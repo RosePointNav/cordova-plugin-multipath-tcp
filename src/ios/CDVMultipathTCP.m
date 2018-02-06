@@ -26,7 +26,7 @@
         NSString *method = [command.arguments objectAtIndex:0];
         NSString *download_url = [command.arguments objectAtIndex:1];
         NSString *hostname, *filename;
-        
+
         NSError *regex_error = NULL;
         NSString *url_regex_string = @"\\b^http:\\/\\/(.+\\.com)(\\/.+$)\\b";
         NSRegularExpression *url_regex = [NSRegularExpression
@@ -43,11 +43,11 @@
             [self sendError:@"Bad download URL format" forId:command.callbackId];
             return;
         }
-        
+
         struct ifaddrs* addrs = 0;
         struct ifaddrs* bind_address = NULL;
         getifaddrs(&addrs);
-        
+
         while(addrs) {
             int isUp = (addrs->ifa_flags & IFF_UP);
             int isIPv4 = (addrs->ifa_addr->sa_family == AF_INET);
@@ -58,12 +58,12 @@
             }
             addrs = addrs->ifa_next;
         }
-        
+
         if (bind_address == NULL) {
             [self sendError:@"No available network interfaces" forId:command.callbackId];
             return;
         }
-        
+
         //get the destination address (not working)
         //struct addrinfo* server_address;
         struct addrinfo hints = {0};
@@ -76,7 +76,7 @@
         //    [self sendError:@"Could not resolve download url" forId:command.callbackId];
         //    return;
         //}
-        
+
         //hardcode server address temporarily
         //(getifaddrs tries to use dead wifi network instead of cell)
         struct sockaddr_in hardcoded_server_addr = {0};
@@ -86,38 +86,38 @@
             [self sendError:@"failed to resolve host IP" forId:command.callbackId];
             return;
         }
-        
+
         //  create a socket
         int request_socket = socket(hints.ai_family, hints.ai_socktype, hints.ai_protocol);
         if (bind(request_socket, bind_address->ifa_addr, sizeof(struct sockaddr_in)) < 0) {
             [self connectivityError: command.callbackId];
             return;
         };
-        
+
         //connect to server
         //if (connect(request_socket, server_address->ai_addr, server_address->ai_addrlen) < 0) {
         if (connect(request_socket, (struct sockaddr *) &hardcoded_server_addr, sizeof(struct sockaddr_in)) < 0) {
             [self connectivityError:command.callbackId];
             return;
         }
-        
+
         //Create Read+Write stream pair
         CFReadStreamRef read_stream;
         CFWriteStreamRef write_stream;
         CFStreamCreatePairWithSocket(kCFAllocatorDefault, request_socket, &read_stream, &write_stream);
-        
+
         //Encode HTTP request
         CFURLRef req_url = CFURLCreateWithString(kCFAllocatorDefault, (__bridge CFStringRef)download_url, NULL);
         CFHTTPMessageRef http_request = CFHTTPMessageCreateRequest(kCFAllocatorDefault, (__bridge CFStringRef)method, req_url, kCFHTTPVersion1_1);
         CFHTTPMessageSetHeaderFieldValue(http_request, CFSTR("Host"), (__bridge CFStringRef)hostname);
         CFHTTPMessageSetHeaderFieldValue(http_request, CFSTR("Accept"), CFSTR("*/*"));
-        
+
         //send http request with write stream
         if(!CFWriteStreamOpen(write_stream)){
             [self connectivityError:command.callbackId];
             return;
         }
-        
+
         CFDataRef request_data = CFHTTPMessageCopySerializedMessage(http_request);
         CFIndex request_length = CFDataGetLength(request_data);
         UInt8 *request_buffer = malloc(request_length);
@@ -129,7 +129,7 @@
         CFWriteStreamClose(write_stream);
         CFRelease(write_stream);
         free(request_buffer);
-        
+
         //read response, building response object
         CFIndex buffer_length =4096;
         UInt8 response_buffer[buffer_length];
@@ -174,19 +174,29 @@
                 return;
             }
         } while( num_bytes_read > 0);
-        
+
         if(total_bytes_read < content_length && [method  isEqual: @"GET"]) {
             [self connectivityError:command.callbackId];
             return;
         }
- 
+
+        // convert a nil body to ""
+        // This is so it can be placed in a NSArray for returning
+        CFDataRef body = CFHTTPMessageCopyBody(response);
+        NSData *ret;
+        if (body == nil) {
+            ret = (NSData*)@"";
+        }else{
+            ret = (__bridge NSData*)body;
+        };
+
         //we need to return a javascript object with
         NSArray *plugin_response =
             @[[NSNumber numberWithLong:CFHTTPMessageGetResponseStatusCode(response)],
               (__bridge NSDictionary*)CFHTTPMessageCopyAllHeaderFields(response),
-              (__bridge NSData*)CFHTTPMessageCopyBody(response)
+              ret
               ];
-        
+
         CDVPluginResult *plugin_result =
             [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsMultipart:plugin_response];
         [self.commandDelegate sendPluginResult:plugin_result callbackId:command.callbackId];
@@ -213,3 +223,4 @@
 }
 
 @end
+
